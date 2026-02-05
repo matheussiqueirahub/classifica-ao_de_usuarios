@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Painel para classificar usuarios por idade, registro e conformidade de seguranca."
+    />
+    <meta name="theme-color" content="#123a4f" />
+    <meta name="robots" content="index,follow" />
+    <meta property="og:title" content="Painel de Classificacao de Usuarios" />
+    <meta
+      property="og:description"
+      content="Classificacao de usuarios com score de confianca, risco e historico operacional."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <title>Painel de Classificacao de Usuarios</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles/main.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Pular para o conteudo principal</a>
+    <div class="background-layer" aria-hidden="true"></div>
+
+    <div class="app-shell">
+      <header class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">Governanca de Acesso</p>
+          <h1>Painel de Classificacao de Usuarios</h1>
+          <p class="hero-description">
+            Classifique usuarios em tempo real com regras de idade, registro e seguranca.
+            O fluxo foi redesenhado para reduzir erros operacionais e acelerar decisoes.
+          </p>
+        </div>
+
+        <div class="metrics" aria-label="Resumo operacional">
+          <article class="metric-card">
+            <p class="metric-label">Analises totais</p>
+            <p id="metric-total" class="metric-value">0</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">Acesso ampliado</p>
+            <p id="metric-access" class="metric-value">0</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">Risco alto</p>
+            <p id="metric-risk" class="metric-value">0</p>
+          </article>
+          <article class="metric-card">
+            <p class="metric-label">Confianca media</p>
+            <p id="metric-score" class="metric-value">0%</p>
+          </article>
+        </div>
+      </header>
+
+      <main id="main-content" class="content-grid">
+        <section class="panel panel-form">
+          <div class="panel-header">
+            <h2>Dados da analise</h2>
+            <p>Preencha os campos para gerar a classificacao do usuario.</p>
+          </div>
+
+          <form id="classification-form" novalidate>
+            <div class="field-grid">
+              <div class="field">
+                <label for="fullName">Nome completo</label>
+                <input
+                  id="fullName"
+                  name="fullName"
+                  type="text"
+                  autocomplete="name"
+                  placeholder="Ex.: Ana Santos"
+                  required
+                />
+                <small id="error-fullName" class="field-error" role="alert"></small>
+              </div>
+
+              <div class="field">
+                <label for="age">Idade</label>
+                <input
+                  id="age"
+                  name="age"
+                  type="number"
+                  min="0"
+                  max="120"
+                  placeholder="Ex.: 29"
+                  required
+                />
+                <small id="error-age" class="field-error" role="alert"></small>
+              </div>
+
+              <div class="field">
+                <label for="registrationStatus">Status de registro</label>
+                <select id="registrationStatus" name="registrationStatus" required>
+                  <option value="">Selecione um status</option>
+                  <option value="registrado">Registrado</option>
+                  <option value="pendente">Pendente</option>
+                  <option value="nao registrado">Nao registrado</option>
+                  <option value="bloqueado">Bloqueado</option>
+                </select>
+                <small
+                  id="error-registrationStatus"
+                  class="field-error"
+                  role="alert"
+                ></small>
+              </div>
+            </div>
+
+            <fieldset class="checks">
+              <legend>Conformidade e seguranca</legend>
+              <label class="check-item" for="emailVerified">
+                <input id="emailVerified" name="emailVerified" type="checkbox" />
+                E-mail validado
+              </label>
+              <label class="check-item" for="twoFactorEnabled">
+                <input id="twoFactorEnabled" name="twoFactorEnabled" type="checkbox" />
+                Autenticacao em dois fatores ativa
+              </label>
+              <label class="check-item" for="acceptedTerms">
+                <input id="acceptedTerms" name="acceptedTerms" type="checkbox" />
+                Termos e politicas aceitos
+              </label>
+            </fieldset>
+
+            <div class="actions">
+              <button class="btn btn-primary" type="submit">Analisar usuario</button>
+              <button class="btn btn-ghost" type="reset">Limpar formulario</button>
+              <button id="export-result" class="btn btn-secondary" type="button" disabled>
+                Exportar JSON
+              </button>
+            </div>
+
+            <p id="form-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+          </form>
+        </section>
+
+        <section class="panel panel-result">
+          <div class="panel-header">
+            <h2>Resultado da classificacao</h2>
+            <p>Visualize o nivel de acesso, risco e recomendacoes acionaveis.</p>
+          </div>
+          <div id="result-card" class="result-empty" aria-live="polite">
+            Preencha o formulario e clique em "Analisar usuario" para gerar o resultado.
+          </div>
+        </section>
+      </main>
+
+      <section class="panel panel-history">
+        <div class="history-header">
+          <div>
+            <h2>Historico local e rastreabilidade</h2>
+            <p>As ultimas analises ficam salvas neste navegador para auditoria rapida.</p>
+          </div>
+          <div class="history-controls">
+            <label for="history-filter">Filtro de acesso</label>
+            <select id="history-filter" name="history-filter">
+              <option value="todos">Todos</option>
+              <option value="completo">Completo</option>
+              <option value="ampliado">Ampliado</option>
+              <option value="supervisionado">Supervisionado</option>
+              <option value="parcial">Parcial</option>
+              <option value="visitante">Visitante</option>
+              <option value="negado">Negado</option>
+            </select>
+            <label for="history-sort">Ordenacao</label>
+            <select id="history-sort" name="history-sort">
+              <option value="newest">Mais recentes</option>
+              <option value="oldest">Mais antigas</option>
+              <option value="trust_desc">Maior confianca</option>
+              <option value="trust_asc">Menor confianca</option>
+            </select>
+            <label for="history-search">Busca por nome</label>
+            <input
+              id="history-search"
+              name="history-search"
+              type="search"
+              placeholder="Digite para filtrar usuario"
+            />
+            <button id="export-history" class="btn btn-secondary" type="button">
+              Exportar historico
+            </button>
+            <button id="clear-history" class="btn btn-danger" type="button">
+              Limpar historico
+            </button>
+          </div>
+        </div>
+
+        <p id="storage-warning" class="storage-warning" hidden></p>
+        <p id="history-summary" class="history-summary" aria-live="polite"></p>
+
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">
+              Lista de analises de usuarios com data, acesso, confianca e risco.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Data</th>
+                <th scope="col">Usuario</th>
+                <th scope="col">Faixa etaria</th>
+                <th scope="col">Acesso</th>
+                <th scope="col">Confianca</th>
+                <th scope="col">Risco</th>
+              </tr>
+            </thead>
+            <tbody id="history-body">
+              <tr>
+                <td colspan="6">Nenhuma analise registrada ate o momento.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script type="module" src="./src/ui/main.js"></script>
+  </body>
+</html>
