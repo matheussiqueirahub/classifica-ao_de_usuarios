@@ -1,0 +1,13 @@
+node_modules/
+npm-debug.log*
+*.log
+.env
+.env.*
+
+# Runtime data
+backend/data/*.json
+!backend/data/.gitkeep
+
+# IDE / OS
+.DS_Store
+Thumbs.db
