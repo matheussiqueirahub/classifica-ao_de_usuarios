@@ -60,6 +60,78 @@
         </div>
       </header>
 
+      <section class="panel panel-connection">
+        <div class="panel-header">
+          <h2>Conexao com backend</h2>
+          <p>Ative modo integrado para usar autenticacao, API e auditoria centralizada.</p>
+        </div>
+
+        <form id="api-session-form" class="connection-form" novalidate>
+          <div class="field-grid">
+            <div class="field">
+              <label for="apiBaseUrl">Base da API</label>
+              <input
+                id="apiBaseUrl"
+                name="apiBaseUrl"
+                type="url"
+                placeholder="http://127.0.0.1:3001/api/v1"
+                required
+              />
+              <small class="field-helper">Use o endpoint `/api/v1` exposto pelo backend.</small>
+            </div>
+
+            <div class="field">
+              <label for="apiEmail">E-mail</label>
+              <input
+                id="apiEmail"
+                name="apiEmail"
+                type="email"
+                autocomplete="username"
+                placeholder="admin@classificacao.local"
+              />
+              <small class="field-helper">Credencial do usuario operador.</small>
+            </div>
+
+            <div class="field">
+              <label for="apiPassword">Senha</label>
+              <input
+                id="apiPassword"
+                name="apiPassword"
+                type="password"
+                autocomplete="current-password"
+                placeholder="********"
+              />
+              <small class="field-helper">Acesso administrativo libera auditoria.</small>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button class="btn btn-primary" type="submit">Entrar na API</button>
+            <button id="disconnect-api" class="btn btn-ghost" type="button">
+              Sair da API
+            </button>
+            <button id="sync-api" class="btn btn-secondary" type="button">
+              Sincronizar dados
+            </button>
+            <button id="load-audit" class="btn btn-secondary" type="button">
+              Carregar auditoria
+            </button>
+          </div>
+        </form>
+
+        <div class="connection-status">
+          <p id="api-mode-badge" class="mode-badge mode-local" aria-live="polite">
+            Modo local ativo
+          </p>
+          <p id="api-user-info" class="connection-hint">
+            Nenhum usuario autenticado.
+          </p>
+          <p id="api-sync-info" class="connection-hint">
+            Sincronizacao pendente.
+          </p>
+        </div>
+      </section>
+
       <main id="main-content" class="content-grid">
         <section class="panel panel-form">
           <div class="panel-header">
@@ -137,7 +209,13 @@
               </button>
             </div>
 
-            <p id="form-feedback" class="form-feedback" role="status" aria-live="polite"></p>
+            <p
+              id="form-feedback"
+              class="form-feedback is-info"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
+            ></p>
           </form>
         </section>
 
@@ -191,9 +269,17 @@
             </button>
           </div>
         </div>
+        <p class="section-note">
+          Em modo API, filtros e paginacao refletem os dados do backend em tempo real.
+        </p>
 
         <p id="storage-warning" class="storage-warning" hidden></p>
         <p id="history-summary" class="history-summary" aria-live="polite"></p>
+        <div class="history-pagination">
+          <button id="history-prev" class="btn btn-ghost" type="button">Anterior</button>
+          <p id="history-page-info" aria-live="polite">Pagina 1 de 1</p>
+          <button id="history-next" class="btn btn-ghost" type="button">Proxima</button>
+        </div>
 
         <div class="table-wrap">
           <table>
@@ -213,6 +299,34 @@
             <tbody id="history-body">
               <tr>
                 <td colspan="6">Nenhuma analise registrada ate o momento.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="audit-panel" class="panel panel-audit" hidden>
+        <div class="panel-header">
+          <h2>Auditoria operacional</h2>
+          <p>Eventos de seguranca e operacao registrados pelo backend (somente admin).</p>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <caption class="sr-only">
+              Eventos de auditoria com data, acao, ator e request id.
+            </caption>
+            <thead>
+              <tr>
+                <th scope="col">Data</th>
+                <th scope="col">Acao</th>
+                <th scope="col">Ator</th>
+                <th scope="col">Resultado</th>
+                <th scope="col">Request ID</th>
+              </tr>
+            </thead>
+            <tbody id="audit-body">
+              <tr>
+                <td colspan="5">Nenhum evento de auditoria carregado.</td>
               </tr>
             </tbody>
           </table>

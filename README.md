@@ -184,6 +184,39 @@ npm test
     `-- classificationEngine.test.js
 ```
 
+## Guia de Design System (Frontend)
+
+### Tokens principais
+- Cores base: `--bg`, `--surface`, `--text`, `--text-soft`, `--brand`, `--danger`, `--success`, `--warning`, `--info`.
+- Espacamentos: `--space-xs`, `--space-sm`, `--space-md`, `--space-lg`, `--space-xl`.
+- Raios e profundidade: `--radius-sm`, `--radius-md`, `--radius-lg`, `--shadow`.
+
+### Tipografia e ritmo visual
+- Familia principal: `Space Grotesk`.
+- Familia auxiliar para labels tecnicos: `IBM Plex Mono`.
+- Hierarquia por blocos: hero -> titulos de painel -> labels -> helper/error text.
+
+### Componentes reutilizaveis
+- Container e paineis: `.app-shell`, `.panel`.
+- Botoes: `.btn`, `.btn-primary`, `.btn-secondary`, `.btn-ghost`, `.btn-danger`.
+- Inputs e selects com foco consistente e estados de validacao.
+- Indicadores de estado: `.chip-*`, `.badge-*`, `.mode-badge`.
+- Feedback de formulario: `.form-feedback.is-info|is-success|is-warning|is-error`.
+
+### Estados de interacao
+- `hover`: ajuste de borda em campos e elevacao leve em botoes.
+- `focus-visible`: anel de foco padronizado para teclado.
+- `disabled`: opacidade reduzida e cursor bloqueado.
+- `error`: borda vermelha em campo + mensagem de erro por campo.
+- `status`: mensagens de acao com severidade visual (info, sucesso, aviso, erro).
+
+### Responsividade e acessibilidade
+- Layout adaptativo por breakpoints (`980px` e `640px`).
+- `skip-link` para navegacao por teclado.
+- `aria-live` nos feedbacks e resumos dinamicos.
+- `caption` em tabelas para leitores de tela.
+- `prefers-reduced-motion` para reduzir animacao em cenarios sensiveis.
+
 ## Boas praticas e padroes adotados
 
 - API versionada e documentada.

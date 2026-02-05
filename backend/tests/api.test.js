@@ -190,6 +190,18 @@ test("fluxo completo de classificacao e analytics funciona", async () => {
     assert.equal(exportCsv.statusCode, 200);
     assert.match(exportCsv.headers["content-type"], /text\/csv/);
     assert.match(exportCsv.body, /userFullName/);
+
+    const auditList = await app.inject({
+      method: "GET",
+      url: "/api/v1/audit/events?page=1&pageSize=10",
+      headers: {
+        authorization: `Bearer ${adminToken}`
+      }
+    });
+    assert.equal(auditList.statusCode, 200);
+    const auditPayload = auditList.json();
+    assert.ok(auditPayload.pagination.total >= 2);
+    assert.ok(auditPayload.items.some((item) => item.action === "CLASSIFICATION_CREATE"));
   } finally {
     await cleanup(app, tempDir);
   }
@@ -234,6 +246,15 @@ test("apenas admin pode limpar historico", async () => {
       }
     });
     assert.equal(denied.statusCode, 403);
+
+    const deniedAudit = await app.inject({
+      method: "GET",
+      url: "/api/v1/audit/events",
+      headers: {
+        authorization: `Bearer ${analystToken}`
+      }
+    });
+    assert.equal(deniedAudit.statusCode, 403);
 
     const allowed = await app.inject({
       method: "DELETE",

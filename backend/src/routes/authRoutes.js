@@ -31,6 +31,22 @@ const userResponseSchema = {
   }
 };
 
+function buildRequestContext(request) {
+  return {
+    ip: request.ip,
+    requestId: request.id,
+    userAgent: request.headers["user-agent"] ?? null
+  };
+}
+
+async function safeAudit(app, payload) {
+  try {
+    await app.services.auditService.record(payload);
+  } catch (error) {
+    app.log.warn({ err: error }, "Falha ao registrar evento de auditoria");
+  }
+}
+
 async function authRoutes(app) {
   app.post(
     "/auth/login",
@@ -61,6 +77,19 @@ async function authRoutes(app) {
         role: user.role
       });
 
+      await safeAudit(app, {
+        action: "AUTH_LOGIN",
+        actor: {
+          id: user.id,
+          email: user.email,
+          role: user.role
+        },
+        request: buildRequestContext(request),
+        metadata: {
+          source: "api"
+        }
+      });
+
       return {
         token,
         tokenType: "Bearer",
@@ -86,6 +115,19 @@ async function authRoutes(app) {
     },
     async (request, reply) => {
       const created = await app.services.authService.register(request.body);
+      await safeAudit(app, {
+        action: "AUTH_REGISTER",
+        actor: {
+          id: request.user.sub,
+          email: request.user.email,
+          role: request.user.role
+        },
+        request: buildRequestContext(request),
+        metadata: {
+          registeredUserId: created.id,
+          registeredUserRole: created.role
+        }
+      });
       reply.code(201).send(created);
     }
   );

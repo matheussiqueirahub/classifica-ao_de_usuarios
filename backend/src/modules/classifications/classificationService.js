@@ -122,8 +122,18 @@ function paginateRecords(records, page, pageSize) {
 }
 
 class ClassificationService {
-  constructor({ classificationRepository }) {
+  constructor({ classificationRepository, summaryCacheTtlMs = 15000 }) {
     this.classificationRepository = classificationRepository;
+    this.summaryCacheTtlMs = summaryCacheTtlMs;
+    this.summaryCache = {
+      value: null,
+      expiresAt: 0
+    };
+  }
+
+  invalidateSummaryCache() {
+    this.summaryCache.value = null;
+    this.summaryCache.expiresAt = 0;
   }
 
   async createClassification(payload, actor) {
@@ -148,7 +158,9 @@ class ClassificationService {
       }
     };
 
-    return this.classificationRepository.create(record);
+    const created = await this.classificationRepository.create(record);
+    this.invalidateSummaryCache();
+    return created;
   }
 
   async getById(id) {
@@ -226,13 +238,20 @@ class ClassificationService {
         expose: true
       });
     }
+
+    this.invalidateSummaryCache();
   }
 
   async clearAll() {
     await this.classificationRepository.clear();
+    this.invalidateSummaryCache();
   }
 
   async getSummary() {
+    if (this.summaryCache.value && Date.now() < this.summaryCache.expiresAt) {
+      return this.summaryCache.value;
+    }
+
     const records = await this.classificationRepository.list();
     const summary = summarizeHistory(records);
     const recent24hCount = records.filter((item) => {
@@ -240,10 +259,13 @@ class ClassificationService {
       return Date.now() - createdAt <= 24 * 60 * 60 * 1000;
     }).length;
 
-    return {
+    const payload = {
       ...summary,
       recent24hCount
     };
+    this.summaryCache.value = payload;
+    this.summaryCache.expiresAt = Date.now() + this.summaryCacheTtlMs;
+    return payload;
   }
 }
 

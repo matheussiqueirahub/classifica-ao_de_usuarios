@@ -10,6 +10,8 @@ import {
   saveRecord,
   storageEnabled
 } from "../services/historyStorage.js";
+import { ApiClient, ApiError, normalizeBaseUrl } from "./apiClient.js";
+import { clearSession, loadSession, saveSession } from "./sessionStore.js";
 
 const ACCESS_KEYS = new Set([
   "completo",
@@ -19,6 +21,9 @@ const ACCESS_KEYS = new Set([
   "visitante",
   "negado"
 ]);
+const FEEDBACK_TYPES = new Set(["success", "error", "warning", "info"]);
+
+const storedSession = loadSession();
 
 const dom = {
   form: document.querySelector("#classification-form"),
@@ -34,6 +39,9 @@ const dom = {
   historySort: document.querySelector("#history-sort"),
   historySearch: document.querySelector("#history-search"),
   historySummary: document.querySelector("#history-summary"),
+  historyPrev: document.querySelector("#history-prev"),
+  historyNext: document.querySelector("#history-next"),
+  historyPageInfo: document.querySelector("#history-page-info"),
   clearHistoryButton: document.querySelector("#clear-history"),
   exportHistoryButton: document.querySelector("#export-history"),
   exportButton: document.querySelector("#export-result"),
@@ -42,7 +50,19 @@ const dom = {
   metricTotal: document.querySelector("#metric-total"),
   metricAccess: document.querySelector("#metric-access"),
   metricRisk: document.querySelector("#metric-risk"),
-  metricScore: document.querySelector("#metric-score")
+  metricScore: document.querySelector("#metric-score"),
+  apiSessionForm: document.querySelector("#api-session-form"),
+  apiBaseUrl: document.querySelector("#apiBaseUrl"),
+  apiEmail: document.querySelector("#apiEmail"),
+  apiPassword: document.querySelector("#apiPassword"),
+  disconnectApiButton: document.querySelector("#disconnect-api"),
+  syncApiButton: document.querySelector("#sync-api"),
+  loadAuditButton: document.querySelector("#load-audit"),
+  apiModeBadge: document.querySelector("#api-mode-badge"),
+  apiUserInfo: document.querySelector("#api-user-info"),
+  apiSyncInfo: document.querySelector("#api-sync-info"),
+  auditPanel: document.querySelector("#audit-panel"),
+  auditBody: document.querySelector("#audit-body")
 };
 
 const fieldErrorMap = {
@@ -62,16 +82,47 @@ const fieldErrorMap = {
 
 const state = {
   latestResult: null,
-  history: loadHistory()
+  history: loadHistory(),
+  historyMeta: {
+    page: 1,
+    pageSize: 20,
+    total: loadHistory().length,
+    totalPages: 1
+  },
+  remoteSummary: null,
+  auditEvents: [],
+  api: {
+    baseUrl: normalizeBaseUrl(storedSession.apiBaseUrl),
+    token: storedSession.token,
+    user: storedSession.user,
+    lastSyncAt: null
+  }
 };
 
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+const apiClient = new ApiClient({
+  baseUrl: state.api.baseUrl,
+  getToken: () => state.api.token
+});
+
+function isApiMode() {
+  return Boolean(state.api.token && state.api.user);
+}
+
+function getAccessCount(summary) {
+  return (summary.byAccessLevel.completo ?? 0) + (summary.byAccessLevel.ampliado ?? 0);
+}
+
+function normalizeSearchText(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function byDate(isoDate) {
+  const parsed = Date.parse(isoDate);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatDateTime(isoDate) {
@@ -99,28 +150,36 @@ function riskChipClass(riskKey) {
 }
 
 function accessBadgeClass(accessKey) {
-  if (!ACCESS_KEYS.has(accessKey)) {
-    return "badge-visitante";
-  }
-
-  return `badge-${accessKey}`;
+  return ACCESS_KEYS.has(accessKey) ? `badge-${accessKey}` : "badge-visitante";
 }
 
 function sanitizeAccessKey(accessKey) {
   return ACCESS_KEYS.has(accessKey) ? accessKey : "visitante";
 }
 
-function normalizeSearchText(value) {
-  return String(value ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .trim()
-    .toLowerCase();
+function escapeHtml(value) {
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
-function byDate(isoDate) {
-  const parsed = Date.parse(isoDate);
-  return Number.isFinite(parsed) ? parsed : 0;
+function setFeedbackState(type) {
+  const safeType = FEEDBACK_TYPES.has(type) ? type : "info";
+  dom.formFeedback.classList.remove(
+    "is-success",
+    "is-error",
+    "is-warning",
+    "is-info"
+  );
+  dom.formFeedback.classList.add(`is-${safeType}`);
+}
+
+function notify(message, type = "info") {
+  setFeedbackState(type);
+  dom.formFeedback.textContent = message;
 }
 
 function clearFieldErrors() {
@@ -131,11 +190,14 @@ function clearFieldErrors() {
 
     if (field.input) {
       field.input.setAttribute("aria-invalid", "false");
+      field.input.removeAttribute("aria-describedby");
     }
   });
 }
 
 function renderFieldErrors(errors) {
+  let firstInvalidInput = null;
+
   Object.entries(errors).forEach(([field, message]) => {
     const target = fieldErrorMap[field];
     if (!target) {
@@ -148,8 +210,16 @@ function renderFieldErrors(errors) {
 
     if (target.input) {
       target.input.setAttribute("aria-invalid", "true");
+      target.input.setAttribute("aria-describedby", `error-${field}`);
+      if (!firstInvalidInput) {
+        firstInvalidInput = target.input;
+      }
     }
   });
+
+  if (firstInvalidInput) {
+    firstInvalidInput.focus();
+  }
 }
 
 function renderResult(result) {
@@ -205,16 +275,6 @@ function renderResult(result) {
   `;
 }
 
-function renderMetrics() {
-  const summary = summarizeHistory(state.history);
-  const accessCount = (summary.byAccessLevel.completo ?? 0) + (summary.byAccessLevel.ampliado ?? 0);
-
-  dom.metricTotal.textContent = String(summary.total);
-  dom.metricAccess.textContent = String(accessCount);
-  dom.metricRisk.textContent = String(summary.byRiskLevel.alto ?? 0);
-  dom.metricScore.textContent = `${summary.averageTrustScore}%`;
-}
-
 function sortHistoryRecords(records, sortKey) {
   const cloned = [...records];
 
@@ -237,7 +297,7 @@ function sortHistoryRecords(records, sortKey) {
   return cloned.sort((a, b) => byDate(b.createdAt) - byDate(a.createdAt));
 }
 
-function getVisibleHistoryRecords() {
+function getVisibleLocalHistoryRecords() {
   const accessFiltered = filterHistoryByAccess(state.history, dom.historyFilter.value);
   const query = normalizeSearchText(dom.historySearch.value);
   const searched = query
@@ -246,12 +306,82 @@ function getVisibleHistoryRecords() {
   return sortHistoryRecords(searched, dom.historySort.value);
 }
 
+function mapSortOptionToApi(sortValue) {
+  if (sortValue === "oldest") {
+    return { sortBy: "createdAt", sortOrder: "asc" };
+  }
+
+  if (sortValue === "trust_desc") {
+    return { sortBy: "trustScore", sortOrder: "desc" };
+  }
+
+  if (sortValue === "trust_asc") {
+    return { sortBy: "trustScore", sortOrder: "asc" };
+  }
+
+  return { sortBy: "createdAt", sortOrder: "desc" };
+}
+
+function buildApiQuery(pageOverride, includePagination = true) {
+  const query = {};
+  const search = dom.historySearch.value.trim();
+  const accessLevel = dom.historyFilter.value;
+  const { sortBy, sortOrder } = mapSortOptionToApi(dom.historySort.value);
+
+  query.sortBy = sortBy;
+  query.sortOrder = sortOrder;
+  query.search = search || undefined;
+  query.accessLevel = accessLevel !== "todos" ? accessLevel : undefined;
+
+  if (includePagination) {
+    query.page = pageOverride ?? state.historyMeta.page;
+    query.pageSize = state.historyMeta.pageSize;
+  }
+
+  return query;
+}
+
+function renderMetrics() {
+  const summary = isApiMode() && state.remoteSummary
+    ? state.remoteSummary
+    : summarizeHistory(state.history);
+
+  dom.metricTotal.textContent = String(summary.total ?? 0);
+  dom.metricAccess.textContent = String(getAccessCount(summary));
+  dom.metricRisk.textContent = String(summary.byRiskLevel?.alto ?? 0);
+  dom.metricScore.textContent = `${summary.averageTrustScore ?? 0}%`;
+}
+
+function updateHistoryPaginationControls() {
+  if (!isApiMode()) {
+    dom.historyPrev.disabled = true;
+    dom.historyNext.disabled = true;
+    dom.historyPageInfo.textContent = "Paginacao ativa somente no modo API";
+    return;
+  }
+
+  const page = state.historyMeta.page ?? 1;
+  const totalPages = state.historyMeta.totalPages ?? 1;
+  dom.historyPrev.disabled = page <= 1;
+  dom.historyNext.disabled = page >= totalPages;
+  dom.historyPageInfo.textContent = `Pagina ${page} de ${totalPages}`;
+}
+
 function renderHistory() {
-  const visibleRecords = getVisibleHistoryRecords();
-  const filterLabel = dom.historyFilter.options[dom.historyFilter.selectedIndex]?.textContent ?? "Todos";
+  const visibleRecords = isApiMode() ? state.history : getVisibleLocalHistoryRecords();
   const query = dom.historySearch.value.trim();
 
-  dom.historySummary.textContent = `${visibleRecords.length} registro(s) exibido(s) de ${state.history.length} no filtro "${filterLabel}"${query ? ` para busca "${query}"` : ""}.`;
+  if (isApiMode()) {
+    dom.historySummary.textContent =
+      `${state.historyMeta.total} registro(s) no backend.` +
+      (query ? ` Busca atual: "${query}".` : "");
+  } else {
+    const filterLabel =
+      dom.historyFilter.options[dom.historyFilter.selectedIndex]?.textContent ?? "Todos";
+    dom.historySummary.textContent =
+      `${visibleRecords.length} registro(s) exibido(s) de ${state.history.length}` +
+      ` no filtro "${filterLabel}"${query ? ` para busca "${query}"` : ""}.`;
+  }
 
   if (visibleRecords.length === 0) {
     dom.historyBody.innerHTML = `
@@ -259,6 +389,7 @@ function renderHistory() {
         <td colspan="6">Nenhuma analise para o filtro selecionado.</td>
       </tr>
     `;
+    updateHistoryPaginationControls();
     return;
   }
 
@@ -286,6 +417,105 @@ function renderHistory() {
       `;
     })
     .join("");
+
+  updateHistoryPaginationControls();
+}
+
+function renderAuditPanel() {
+  if (!state.auditEvents.length) {
+    dom.auditBody.innerHTML = `
+      <tr>
+        <td colspan="5">Nenhum evento de auditoria carregado.</td>
+      </tr>
+    `;
+    return;
+  }
+
+  dom.auditBody.innerHTML = state.auditEvents
+    .map((event) => `
+      <tr>
+        <td>${formatDateTime(event.createdAt)}</td>
+        <td>${escapeHtml(event.action ?? "-")}</td>
+        <td>${escapeHtml(event.actor?.email ?? "Sistema")}</td>
+        <td>${escapeHtml(event.outcome ?? "success")}</td>
+        <td>${escapeHtml(event.request?.requestId ?? "-")}</td>
+      </tr>
+    `)
+    .join("");
+}
+
+function updateConnectionPanel() {
+  dom.apiBaseUrl.value = state.api.baseUrl;
+
+  if (isApiMode()) {
+    dom.apiModeBadge.textContent = "Modo API autenticado";
+    dom.apiModeBadge.classList.add("mode-api");
+    dom.apiModeBadge.classList.remove("mode-local");
+    dom.apiUserInfo.textContent = `Usuario: ${state.api.user.fullName} (${state.api.user.role})`;
+    dom.apiSyncInfo.textContent = state.api.lastSyncAt
+      ? `Ultima sincronizacao: ${formatDateTime(state.api.lastSyncAt)}`
+      : "Sincronizacao pendente.";
+  } else {
+    dom.apiModeBadge.textContent = "Modo local ativo";
+    dom.apiModeBadge.classList.add("mode-local");
+    dom.apiModeBadge.classList.remove("mode-api");
+    dom.apiUserInfo.textContent = "Nenhum usuario autenticado.";
+    dom.apiSyncInfo.textContent = "Sincronizacao pendente.";
+  }
+
+  dom.disconnectApiButton.disabled = !isApiMode();
+  dom.syncApiButton.disabled = !isApiMode();
+  dom.loadAuditButton.disabled = !isApiMode() || state.api.user?.role !== "admin";
+}
+
+function persistApiSession() {
+  if (!isApiMode()) {
+    clearSession();
+    return;
+  }
+
+  saveSession({
+    apiBaseUrl: state.api.baseUrl,
+    token: state.api.token,
+    user: state.api.user
+  });
+}
+
+async function syncFromApi(pageOverride) {
+  if (!isApiMode()) {
+    return false;
+  }
+
+  try {
+    const query = buildApiQuery(pageOverride, true);
+    const [listResponse, summary] = await Promise.all([
+      apiClient.listClassifications(query),
+      apiClient.getSummary()
+    ]);
+
+    state.history = listResponse.items;
+    state.historyMeta = {
+      page: listResponse.pagination.page,
+      pageSize: listResponse.pagination.pageSize,
+      total: listResponse.pagination.total,
+      totalPages: listResponse.pagination.totalPages
+    };
+    state.remoteSummary = summary;
+    state.api.lastSyncAt = new Date().toISOString();
+    renderMetrics();
+    renderHistory();
+    updateConnectionPanel();
+    return true;
+  } catch (error) {
+    if (error instanceof ApiError && error.statusCode === 401) {
+      disconnectApiSession(false);
+      notify("Sessao expirada. Volte a autenticar.", "warning");
+      return false;
+    }
+
+    notify(`Falha ao sincronizar API: ${error.message}`, "error");
+    return false;
+  }
 }
 
 function readFormData() {
@@ -299,103 +529,159 @@ function readFormData() {
   };
 }
 
-function notify(message) {
-  dom.formFeedback.textContent = message;
-}
-
-function refreshDashboard() {
-  renderMetrics();
-  renderHistory();
+function downloadTextFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
 
 function exportCurrentResult() {
   if (!state.latestResult) {
-    notify("Realize uma analise antes de exportar.");
+    notify("Realize uma analise antes de exportar.", "warning");
     return;
   }
 
-  const payload = JSON.stringify(state.latestResult, null, 2);
-  const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
   const safeName = state.latestResult.user.fullName
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9-]/g, "");
 
-  link.href = url;
-  link.download = `classificacao-${safeName || "usuario"}.json`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  notify("Resultado exportado em JSON com sucesso.");
+  downloadTextFile(
+    `classificacao-${safeName || "usuario"}.json`,
+    JSON.stringify(state.latestResult, null, 2),
+    "application/json;charset=utf-8"
+  );
+  notify("Resultado exportado em JSON com sucesso.", "success");
 }
 
-function exportHistory() {
+async function exportHistory() {
   if (!state.history.length) {
-    notify("Nao ha historico para exportar.");
+    notify("Nao ha historico para exportar.", "warning");
     return;
   }
 
-  const payload = JSON.stringify(getVisibleHistoryRecords(), null, 2);
-  const blob = new Blob([payload], { type: "application/json;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  link.href = url;
-  link.download = `historico-classificacao-${timestamp}.json`;
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  notify("Historico filtrado exportado em JSON.");
+  if (isApiMode()) {
+    try {
+      const payload = await apiClient.exportClassifications(
+        "json",
+        buildApiQuery(undefined, false)
+      );
+      downloadTextFile(
+        `historico-classificacao-api-${Date.now()}.json`,
+        JSON.stringify(payload, null, 2),
+        "application/json;charset=utf-8"
+      );
+      notify("Historico remoto exportado em JSON.", "success");
+      return;
+    } catch (error) {
+      notify(`Falha ao exportar via API: ${error.message}`, "error");
+      return;
+    }
+  }
+
+  const payload = JSON.stringify(getVisibleLocalHistoryRecords(), null, 2);
+  downloadTextFile(
+    `historico-classificacao-local-${Date.now()}.json`,
+    payload,
+    "application/json;charset=utf-8"
+  );
+  notify("Historico local exportado em JSON.", "success");
 }
 
-function onSubmit(event) {
+async function onSubmit(event) {
   event.preventDefault();
   clearFieldErrors();
 
   const payload = readFormData();
   const validation = validateUserInput(payload);
-
   if (!validation.isValid) {
     renderFieldErrors(validation.errors);
-    notify("Revise os campos destacados e tente novamente.");
+    notify("Revise os campos destacados e tente novamente.", "warning");
+    return;
+  }
+
+  if (isApiMode()) {
+    try {
+      const created = await apiClient.createClassification(validation.sanitizedData);
+      state.latestResult = created;
+      renderResult(created);
+      dom.exportButton.disabled = false;
+      await syncFromApi(1);
+      notify(`Classificacao enviada para API: ${created.user.fullName}.`, "success");
+    } catch (error) {
+      notify(`Falha ao criar classificacao na API: ${error.message}`, "error");
+    }
     return;
   }
 
   const result = classifyUser(validation.sanitizedData);
   state.latestResult = result;
   state.history = saveRecord(result);
+  state.historyMeta = {
+    page: 1,
+    pageSize: 20,
+    total: state.history.length,
+    totalPages: 1
+  };
   dom.exportButton.disabled = false;
   renderResult(result);
-  refreshDashboard();
-  notify(`Classificacao concluida para ${result.user.fullName}.`);
+  renderMetrics();
+  renderHistory();
+  notify(`Classificacao concluida para ${result.user.fullName}.`, "success");
 }
 
 function onReset() {
   clearFieldErrors();
-  renderResult(null);
   state.latestResult = null;
   dom.exportButton.disabled = true;
-  notify("Formulario limpo.");
+  renderResult(null);
+  notify("Formulario limpo.", "info");
 }
 
-function onClearHistory() {
+async function onClearHistory() {
+  if (isApiMode()) {
+    try {
+      await apiClient.clearClassifications();
+      state.history = [];
+      state.historyMeta.page = 1;
+      await syncFromApi(1);
+      notify("Historico remoto removido.", "success");
+    } catch (error) {
+      notify(`Falha ao limpar historico remoto: ${error.message}`, "error");
+    }
+    return;
+  }
+
   clearHistory();
   state.history = [];
-  refreshDashboard();
-  notify("Historico removido.");
+  state.historyMeta = {
+    page: 1,
+    pageSize: 20,
+    total: 0,
+    totalPages: 1
+  };
+  renderMetrics();
+  renderHistory();
+  notify("Historico local removido.", "success");
 }
 
-function onFilterChange() {
+async function onFilterChange() {
+  if (isApiMode()) {
+    await syncFromApi(1);
+    return;
+  }
+
   renderHistory();
 }
 
-function createDebounce(callback, delay = 120) {
+function createDebounce(callback, delay = 150) {
   let timeoutId;
-
   return (...args) => {
     clearTimeout(timeoutId);
     timeoutId = setTimeout(() => callback(...args), delay);
@@ -418,27 +704,175 @@ function setupStorageFeedback() {
   if (!storageEnabled) {
     dom.storageWarning.hidden = false;
     dom.storageWarning.textContent =
-      "Armazenamento local indisponivel neste navegador. O historico sera exibido apenas durante a sessao.";
+      "Armazenamento local indisponivel neste navegador. O historico local sera somente de sessao.";
+  }
+}
+
+function disconnectApiSession(render = true) {
+  state.api.token = null;
+  state.api.user = null;
+  state.api.lastSyncAt = null;
+  state.remoteSummary = null;
+  state.auditEvents = [];
+  state.history = loadHistory();
+  state.historyMeta = {
+    page: 1,
+    pageSize: 20,
+    total: state.history.length,
+    totalPages: 1
+  };
+  clearSession();
+
+  if (render) {
+    dom.auditPanel.hidden = true;
+    updateConnectionPanel();
+    renderMetrics();
+    renderHistory();
+  }
+}
+
+async function onApiSessionSubmit(event) {
+  event.preventDefault();
+  const baseUrl = normalizeBaseUrl(dom.apiBaseUrl.value);
+  const email = dom.apiEmail.value.trim();
+  const password = dom.apiPassword.value;
+
+  if (!email || !password) {
+    notify("Informe email e senha para autenticar na API.", "warning");
+    return;
+  }
+
+  apiClient.setBaseUrl(baseUrl);
+  state.api.baseUrl = baseUrl;
+
+  try {
+    const login = await apiClient.login({ email, password });
+    state.api.token = login.token;
+    state.api.user = login.user;
+    state.api.lastSyncAt = null;
+    persistApiSession();
+    dom.apiPassword.value = "";
+    dom.auditPanel.hidden = true;
+    updateConnectionPanel();
+    await syncFromApi(1);
+    notify(`Autenticado na API como ${login.user.fullName}.`, "success");
+  } catch (error) {
+    notify(`Falha ao autenticar na API: ${error.message}`, "error");
+  }
+}
+
+function onDisconnectApi() {
+  disconnectApiSession(true);
+  notify("Sessao API encerrada. Modo local reativado.", "info");
+}
+
+async function onSyncApi() {
+  if (!isApiMode()) {
+    notify("Autentique na API antes de sincronizar.", "warning");
+    return;
+  }
+
+  const synced = await syncFromApi(state.historyMeta.page ?? 1);
+  if (synced) {
+    notify("Dados sincronizados com o backend.", "success");
+  }
+}
+
+async function onLoadAudit() {
+  if (!isApiMode()) {
+    notify("Autentique na API para carregar auditoria.", "warning");
+    return;
+  }
+
+  if (state.api.user.role !== "admin") {
+    notify("Somente admin pode consultar auditoria.", "warning");
+    return;
+  }
+
+  try {
+    const response = await apiClient.listAuditEvents({
+      page: 1,
+      pageSize: 10
+    });
+    state.auditEvents = response.items;
+    renderAuditPanel();
+    dom.auditPanel.hidden = false;
+    notify(`${response.pagination.total} evento(s) de auditoria disponiveis.`, "success");
+  } catch (error) {
+    notify(`Falha ao carregar auditoria: ${error.message}`, "error");
+  }
+}
+
+async function onHistoryPrevPage() {
+  if (!isApiMode() || state.historyMeta.page <= 1) {
+    return;
+  }
+
+  await syncFromApi(state.historyMeta.page - 1);
+}
+
+async function onHistoryNextPage() {
+  if (!isApiMode() || state.historyMeta.page >= state.historyMeta.totalPages) {
+    return;
+  }
+
+  await syncFromApi(state.historyMeta.page + 1);
+}
+
+async function restoreApiSession() {
+  if (!state.api.token) {
+    return;
+  }
+
+  apiClient.setBaseUrl(state.api.baseUrl);
+
+  try {
+    const me = await apiClient.me();
+    state.api.user = me;
+    persistApiSession();
+    await syncFromApi(1);
+    notify(`Sessao restaurada para ${me.fullName}.`, "info");
+  } catch {
+    disconnectApiSession(false);
+    notify("Sessao anterior invalida. Utilize login novamente.", "warning");
   }
 }
 
 function attachEvents() {
-  const debouncedSearch = createDebounce(() => renderHistory(), 150);
+  const debouncedSearch = createDebounce(async () => {
+    if (isApiMode()) {
+      await syncFromApi(1);
+      return;
+    }
+
+    renderHistory();
+  });
+
   dom.form.addEventListener("submit", onSubmit);
   dom.form.addEventListener("reset", onReset);
   dom.clearHistoryButton.addEventListener("click", onClearHistory);
   dom.historyFilter.addEventListener("change", onFilterChange);
   dom.historySort.addEventListener("change", onFilterChange);
   dom.historySearch.addEventListener("input", debouncedSearch);
+  dom.historyPrev.addEventListener("click", onHistoryPrevPage);
+  dom.historyNext.addEventListener("click", onHistoryNextPage);
   dom.exportHistoryButton.addEventListener("click", exportHistory);
   dom.exportButton.addEventListener("click", exportCurrentResult);
+  dom.apiSessionForm.addEventListener("submit", onApiSessionSubmit);
+  dom.disconnectApiButton.addEventListener("click", onDisconnectApi);
+  dom.syncApiButton.addEventListener("click", onSyncApi);
+  dom.loadAuditButton.addEventListener("click", onLoadAudit);
   document.addEventListener("keydown", onShortcutSubmit);
 }
 
-function init() {
+async function init() {
   setupStorageFeedback();
+  updateConnectionPanel();
   attachEvents();
-  refreshDashboard();
+  renderResult(null);
+  renderMetrics();
+  renderHistory();
+  await restoreApiSession();
 }
 
-init();
+await init();

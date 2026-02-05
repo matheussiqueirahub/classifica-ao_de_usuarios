@@ -97,6 +97,22 @@ const classificationResponseSchema = {
   }
 };
 
+function buildRequestContext(request) {
+  return {
+    ip: request.ip,
+    requestId: request.id,
+    userAgent: request.headers["user-agent"] ?? null
+  };
+}
+
+async function safeAudit(app, payload) {
+  try {
+    await app.services.auditService.record(payload);
+  } catch (error) {
+    app.log.warn({ err: error }, "Falha ao registrar evento de auditoria");
+  }
+}
+
 async function classificationRoutes(app) {
   app.get(
     "/classifications/export",
@@ -135,6 +151,20 @@ async function classificationRoutes(app) {
     async (request, reply) => {
       const format = request.query.format === "csv" ? "csv" : "json";
       const records = await app.services.classificationService.export(request.query);
+
+      await safeAudit(app, {
+        action: "CLASSIFICATION_EXPORT",
+        actor: {
+          id: request.user.sub,
+          email: request.user.email,
+          role: request.user.role
+        },
+        request: buildRequestContext(request),
+        metadata: {
+          format,
+          count: records.length
+        }
+      });
 
       if (format === "csv") {
         const header =
@@ -186,6 +216,19 @@ async function classificationRoutes(app) {
         request.body,
         request.user
       );
+      await safeAudit(app, {
+        action: "CLASSIFICATION_CREATE",
+        actor: {
+          id: request.user.sub,
+          email: request.user.email,
+          role: request.user.role
+        },
+        request: buildRequestContext(request),
+        metadata: {
+          classificationId: created.id,
+          accessLevel: created.access?.key ?? null
+        }
+      });
       reply.code(201).send(created);
     }
   );
@@ -299,6 +342,18 @@ async function classificationRoutes(app) {
     },
     async (request, reply) => {
       await app.services.classificationService.deleteById(request.params.id);
+      await safeAudit(app, {
+        action: "CLASSIFICATION_DELETE",
+        actor: {
+          id: request.user.sub,
+          email: request.user.email,
+          role: request.user.role
+        },
+        request: buildRequestContext(request),
+        metadata: {
+          classificationId: request.params.id
+        }
+      });
       reply.code(204).send();
     }
   );
@@ -318,8 +373,20 @@ async function classificationRoutes(app) {
         }
       }
     },
-    async (_, reply) => {
+    async (request, reply) => {
       await app.services.classificationService.clearAll();
+      await safeAudit(app, {
+        action: "CLASSIFICATION_CLEAR",
+        actor: {
+          id: request.user.sub,
+          email: request.user.email,
+          role: request.user.role
+        },
+        request: buildRequestContext(request),
+        metadata: {
+          mode: "bulk"
+        }
+      });
       reply.code(204).send();
     }
   );

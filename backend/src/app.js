@@ -8,14 +8,18 @@ import swaggerUI from "@fastify/swagger-ui";
 import { loadConfig } from "./config/env.js";
 import authPlugin from "./plugins/auth.js";
 import errorHandlerPlugin from "./plugins/errorHandler.js";
+import observabilityPlugin from "./plugins/observability.js";
 import healthRoutes from "./routes/healthRoutes.js";
 import authRoutes from "./routes/authRoutes.js";
 import classificationRoutes from "./routes/classificationRoutes.js";
 import analyticsRoutes from "./routes/analyticsRoutes.js";
+import auditRoutes from "./routes/auditRoutes.js";
 import { UserRepository } from "./modules/auth/userRepository.js";
 import { AuthService } from "./modules/auth/authService.js";
 import { ClassificationRepository } from "./modules/classifications/classificationRepository.js";
 import { ClassificationService } from "./modules/classifications/classificationService.js";
+import { AuditRepository } from "./modules/audit/auditRepository.js";
+import { AuditService } from "./modules/audit/auditService.js";
 
 function createCorsOriginChecker(allowedOrigins) {
   return (origin, callback) => {
@@ -44,6 +48,8 @@ async function buildApp(options = {}) {
   const classificationRepository =
     options.classificationRepository ??
     new ClassificationRepository(config.storage.dataDir);
+  const auditRepository =
+    options.auditRepository ?? new AuditRepository(config.storage.dataDir);
 
   const authService = new AuthService({
     userRepository,
@@ -52,11 +58,15 @@ async function buildApp(options = {}) {
   const classificationService = new ClassificationService({
     classificationRepository
   });
+  const auditService = new AuditService({
+    auditRepository
+  });
 
   app.decorate("config", config);
   app.decorate("services", {
     authService,
-    classificationService
+    classificationService,
+    auditService
   });
 
   await app.register(helmet, {
@@ -92,7 +102,8 @@ async function buildApp(options = {}) {
         { name: "health", description: "Saude da API" },
         { name: "auth", description: "Autenticacao e usuarios" },
         { name: "classifications", description: "Operacoes de classificacao" },
-        { name: "analytics", description: "Consolidacao e metricas" }
+        { name: "analytics", description: "Consolidacao e metricas" },
+        { name: "audit", description: "Trilha de auditoria operacional" }
       ],
       components: {
         securitySchemes: {
@@ -114,6 +125,7 @@ async function buildApp(options = {}) {
     }
   });
 
+  await app.register(observabilityPlugin);
   await app.register(authPlugin);
   await app.register(errorHandlerPlugin);
 
@@ -123,6 +135,7 @@ async function buildApp(options = {}) {
       await v1.register(authRoutes);
       await v1.register(classificationRoutes);
       await v1.register(analyticsRoutes);
+      await v1.register(auditRoutes);
     },
     { prefix: "/api/v1" }
   );
